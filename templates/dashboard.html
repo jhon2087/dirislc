@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard de Verificación FTP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+  <!-- Bootstrap + librerías -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+  <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Estilos corporativos -->
+  <style>
+    body {
+      background-color: #f4f6f9;
+      font-family: "Segoe UI", sans-serif;
+      color: #333;
+    }
+
+    .navbar {
+      background-color: #0d47a1;
+      color: white;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+
+    .navbar-brand {
+      color: #fff !important;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+    }
+
+    .card {
+      border: none;
+      border-radius: 0.8rem;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.05);
+    }
+
+    .card h3 {
+      font-weight: bold;
+      font-size: 1.7rem;
+    }
+
+    .progress {
+      height: 24px;
+      border-radius: 0.5rem;
+    }
+
+    .section-title {
+      font-weight: 600;
+      color: #0d47a1;
+      border-left: 5px solid #0d47a1;
+      padding-left: 10px;
+      margin-bottom: 20px;
+    }
+
+    .footer {
+      text-align: center;
+      font-size: 0.9rem;
+      color: #777;
+      margin-top: 50px;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg px-4">
+    <a class="navbar-brand" href="#">📊 Verificación de Archivos FTP</a>
+  </nav>
+
+  <!-- Contenido principal -->
+  <div class="container my-5">
+    <div class="text-center mb-5">
+      <h2 class="fw-bold text-dark">Panel de Monitoreo de Archivos</h2>
+      <p class="text-muted">Ruta FTP: <b>{{ ftp_path or 'Ruta no definida' }}</b></p>
+      {% if ultima_actualizacion %}
+      <p class="text-muted">Última actualización: {{ ultima_actualizacion }}</p>
+      {% endif %}
+    </div>
+
+    <!-- Indicadores principales -->
+    <div class="row g-3 mb-4 text-center">
+      <div class="col-md-3">
+        <div class="card p-3 bg-white">
+          <h6 class="text-secondary mb-1">Total esperados</h6>
+          <h3 class="text-primary">{{ total }}</h3>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card p-3 text-white" style="background-color:#2e7d32;">
+          <h6>Encontrados</h6>
+          <h3>{{ encontrados }}</h3>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card p-3 text-white" style="background-color:#f9a825;">
+          <h6>Faltantes</h6>
+          <h3>{{ faltantes_count }}</h3>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card p-3 text-white" style="background-color:#0277bd;">
+          <h6>Avance</h6>
+          <h3>{{ porcentaje }}%</h3>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección dividida: gráfico izquierda / lista derecha -->
+    <div class="row g-4">
+      <!-- Gráfico (izquierda) -->
+      <div class="col-lg-5">
+        <div class="card p-4">
+          <h5 class="section-title mb-3">Progreso General</h5>
+          <div class="text-center mb-3">
+            <canvas id="grafico" height="250"></canvas>
+          </div>
+          <div class="progress mt-2">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                 role="progressbar" style="width: {{ porcentaje }}%;">
+              {{ porcentaje }}%
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabla (derecha) -->
+      <div class="col-lg-7">
+        <div class="card p-4">
+          {% if faltantes %}
+            <h5 class="section-title text-danger">Archivos Faltantes</h5>
+            <div class="table-responsive">
+              <table id="tabla" class="table table-striped table-hover table-bordered align-middle">
+                <thead class="table-light">
+                  <tr>
+                    <th>RENIPRES</th>
+                    <th>Establecimiento</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for f in faltantes %}
+                    <tr>
+                      <td>{{ f.RENIPRES }}</td>
+                      <td>{{ f["E.S"] }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="alert alert-success text-center fs-5">
+              ✅ Todos los archivos están presentes en el FTP.
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <p>© {{ (ultima_actualizacion[:4] if ultima_actualizacion else '2025') }} — Sistema de Verificación FTP | <b>Área Informática</b></p>
+  </div>
+
+  <!-- Scripts -->
+  <script>
+    $(document).ready(function() {
+      $('#tabla').DataTable({
+        "pageLength": 8,
+        "language": {
+          "url": "//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json"
+        }
+      });
+
+      // Gráfico de dona elegante
+      const ctx = document.getElementById('grafico');
+      new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Encontrados', 'Faltantes'],
+          datasets: [{
+            data: [{{ encontrados }}, {{ faltantes_count }}],
+            backgroundColor: ['#2e7d32', '#f9a825'],
+            borderWidth: 3,
+            hoverOffset: 10
+          }]
+        },
+        options: {
+          plugins: {
+            legend: { position: 'bottom', labels: { font: { size: 14 } } }
+          },
+          cutout: '65%'
+        }
+      });
+    });
+  </script>
+</body>
+</html>
