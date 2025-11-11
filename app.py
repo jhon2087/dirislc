@@ -1,75 +1,70 @@
-
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template
 from ftplib import FTP
 import pandas as pd
-import re, os
+import re
 from datetime import datetime
 
 app = Flask(__name__)
 
 @app.route("/")
-def home():
-    return render_template("dashboard.html")
+def verificar_ftp():
+    # --- CONFIGURACIÓN ---
+    FTP_HOST = "pe01-st.hostinglabs.net"   # 👉 Cambia por tu servidor
+    FTP_USER = "dirislc@pe02-st.hostinglabs.net"
+    FTP_PASS = "+2xaTGHZ7N$w+r*4"
+    BASE_PATH = "/archivos"            # carpeta base en el FTP
+    archivo_lista = "ver.xlsx" 
 
-@app.route("/api")
-def api():
-    FTP_HOST="pe01-st.hostinglabs.net"
-    FTP_USER="dirislc@pe02-st.hostinglabs.net"
-    FTP_PASS="+2xaTGHZ7N$w+r*4"
-    BASE="/archivos"
+    # --- RUTA AUTOMÁTICA ---
+    mes_actual = datetime.now().strftime("%m")
+    FTP_PATH = f"{BASE_PATH}/{mes_actual}"
 
-    month=datetime.now().strftime("%m")
-    path=f"{BASE}/{month}"
+    # --- CONEXIÓN FTP ---
+    ftp = FTP(FTP_HOST)
+    ftp.login(FTP_USER, FTP_PASS)
+    ftp.cwd(FTP_PATH)
+    archivos = ftp.nlst()
+    ftp.quit()
 
-    renipres=[]
-    try:
-        ftp=FTP(FTP_HOST)
-        ftp.login(FTP_USER,FTP_PASS)
-        ftp.cwd(path)
-        files=ftp.nlst()
-        ftp.quit()
+    # --- LEE EXCEL ---
+    df = pd.read_excel(archivo_lista)
+    df = df.iloc[:, :2]
+    df.columns = ["RENIPRES", "E.S"]
+    df = df.dropna(subset=["RENIPRES"])
+    df["RENIPRES"] = df["RENIPRES"].astype(int)
+    lista_excel = df["RENIPRES"].tolist()
 
-        pattern=re.compile(r"^RAtenDet-(\d{8})-")
-        for f in files:
-            m=pattern.search(f)
-            if m:
-                n=int(m.group(1).lstrip("0") or "0")
-                renipres.append(n)
+    # --- BUSCA ARCHIVOS FTP ---
+    patron = re.compile(r'^RAtenDet-(\d+)-')
+    renipres_en_archivos = [
+        int(patron.search(a).group(1))
+        for a in archivos if patron.search(a)
+    ]
 
-    except:
-        files=[]
-        renipres=[]
+    # --- COMPARA ---
+    faltantes = df[~df["RENIPRES"].isin(renipres_en_archivos)]
+    extras = [a for a in renipres_en_archivos if a not in lista_excel]
 
-    if not os.path.exists("ver.xlsx"):
-        return jsonify({
-            "total":0,"encontrados":len(renipres),"faltantes":[],
-            "faltantes_count":0,"porcentaje":0,
-            "ftp_folder":path,
-            "timestamp":datetime.now().isoformat()
-        })
+    total = len(lista_excel)
+    encontrados = len(renipres_en_archivos)
+    faltantes_count = len(faltantes)
+    porcentaje = round((encontrados / total) * 100, 2)
 
-    df=pd.read_excel("ver.xlsx")
-    df=df.iloc[:,0:2]
-    df.columns=["RENIPRES","ES"]
-    df=df.dropna(subset=["RENIPRES"])
-    df["RENIPRES"]=df["RENIPRES"].astype(int)
-    excel=df["RENIPRES"].tolist()
+    return render_template("dashboard.html",
+                           total=total,
+                           encontrados=encontrados,
+                           faltantes=faltantes.to_dict(orient="records"),
+                           faltantes_count=faltantes_count,
+                           extras=extras,
+                           porcentaje=porcentaje)
 
-    falt=df[~df["RENIPRES"].isin(renipres)]
-    total=len(excel)
-    encontrados=len(renipres)
-    falt_count=len(falt)
-    por=round((encontrados/total)*100,2) if total else 0
+if __name__ == "__main__":
+    import threading, webbrowser, os
 
-    return jsonify({
-        "total":total,
-        "encontrados":encontrados,
-        "faltantes":falt.to_dict(orient="records"),
-        "faltantes_count":falt_count,
-        "porcentaje":por,
-        "ftp_folder":path,
-        "timestamp":datetime.now().isoformat()
-    })
+    url = "http://127.0.0.1:5000"
 
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=5000)
+    # Solo abrir navegador en el proceso principal (no en el reloader)
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+
+    app.run(debug=True)
