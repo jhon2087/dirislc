@@ -245,6 +245,14 @@ def ver_establecimientos():
 
 
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    import threading
+    import webbrowser
+    
+    url = "http://127.0.0.1:5000"
+    
+    # Solo abrir navegador en el proceso principal
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    
+    logger.info(f"Iniciando servidor en {url}")
+    app.run(debug=True, host='0.0.0.0', port=5000)
