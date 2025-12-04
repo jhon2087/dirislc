@@ -132,41 +132,46 @@ def procesar_datos(archivos):
 
 def obtener_detalle_establecimientos():
     """
-    Obtiene info de establecimientos SOLO con archivos del día actual (optimizado)
+    Versión ULTRA optimizada:
+    - nlst solo 1 vez
+    - MDTM solo 1 vez por archivo
+    - Diccionario RENIPRES → info
+    - Cruce instantáneo con Excel
     """
-    df = pd.read_excel(ARCHIVO_LISTA)
-    df = df.iloc[:, :3]
-    df.columns = ["RENIPRES", "E.S", "RIS"]
-    df = df.dropna()
-    df["RENIPRES"] = df["RENIPRES"].astype(int)
+    try:
+        tz_lima = pytz.timezone("America/Lima")
+        hoy = datetime.now(tz_lima).date()
 
-    ftp = conectar_ftp()
-    mes_actual = datetime.now().strftime("%m")
-    ftp.cwd(f"{BASE_PATH}/{mes_actual}")
+        # Leer Excel
+        df = pd.read_excel(ARCHIVO_LISTA)
+        df = df.iloc[:, :3]
+        df.columns = ["RENIPRES", "E.S", "RIS"]
+        df = df.dropna()
+        df["RENIPRES"] = df["RENIPRES"].astype(int)
 
-    archivos = [a for a in ftp.nlst() if a.startswith("RAtenDet-")]
+        # FTP
+        ftp = conectar_ftp()
+        mes_actual = datetime.now().strftime("%m")
+        ftp.cwd(f"{BASE_PATH}/{mes_actual}")
 
-    patron = re.compile(r'^RAtenDet-(\d+)-')
-    tz_lima = pytz.timezone("America/Lima")
-    hoy = datetime.now(tz_lima).date()
+        # 🔥 Obtener solo archivos RAtenDet- y MDTM una sola vez
+        archivos = ftp.nlst()
+        archivos = [a for a in archivos if a.startswith("RAtenDet-")]
 
-    detalle = []
-    mdtm_cache = {}
+        patron = re.compile(r'^RAtenDet-(\d+)-')
+        mdtm_cache = {}
 
-    for _, row in df.iterrows():
-        ren = row["RENIPRES"]
-        archivos_es = []
-        fecha_carga = None
+        # 🔥 Diccionario renipres → (fecha, archivo)
+        dic_archivos = {}
 
         for arch in archivos:
             m = patron.match(arch)
             if not m:
                 continue
 
-            if int(m.group(1)) != ren:
-                continue
+            ren = int(m.group(1))
 
-            # Cache MDTM (MUY RÁPIDO)
+            # MDTM solo una vez
             if arch not in mdtm_cache:
                 try:
                     info = ftp.sendcmd(f"MDTM {arch}")
@@ -179,22 +184,45 @@ def obtener_detalle_establecimientos():
 
             fecha_arch = mdtm_cache[arch]
 
+            # Solo archivos de HOY
             if fecha_arch.date() != hoy:
                 continue
 
-            archivos_es.append(arch)
-            fecha_carga = fecha_arch
+            # Guardar en diccionario
+            dic_archivos[ren] = {
+                "fecha": fecha_arch,
+                "archivo": arch
+            }
 
-        detalle.append({
-            "RIS": row["RIS"],
-            "RENIPRES": ren,
-            "ESTABLECIMIENTO": row["E.S"],
-            "FECHA_CARGA": fecha_carga.strftime("%d/%m/%Y %H:%M:%S") if fecha_carga else "—",
-            "ARCHIVOS": ", ".join(archivos_es) if archivos_es else "—"
-        })
+        ftp.quit()
 
-    ftp.quit()
-    return detalle
+        # 🔥 Armar tabla final MUY RÁPIDO
+        detalle = []
+        for _, row in df.iterrows():
+            ren = row["RENIPRES"]
+
+            if ren in dic_archivos:
+                fecha = dic_archivos[ren]["fecha"]
+                archivo = dic_archivos[ren]["archivo"]
+                fecha_fmt = fecha.strftime("%d/%m/%Y %H:%M:%S")
+            else:
+                fecha_fmt = "—"
+                archivo = "—"
+
+            detalle.append({
+                "RIS": row["RIS"],
+                "RENIPRES": ren,
+                "ESTABLECIMIENTO": row["E.S"],
+                "FECHA_CARGA": fecha_fmt,
+                "ARCHIVOS": archivo
+            })
+
+        return detalle
+
+    except Exception as e:
+        logger.error(f"Error optimizando establecimientos: {e}")
+        raise
+
 
 
 @app.route("/")
@@ -213,6 +241,7 @@ def index():
 def ver_establecimientos():
     detalle = obtener_detalle_establecimientos()
     return render_template("establecimientos.html", detalle=detalle)
+
 
 
 if __name__ == "__main__":
