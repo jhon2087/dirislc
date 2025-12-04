@@ -227,14 +227,20 @@ def obtener_detalle_establecimientos():
 
 @app.route("/")
 def index():
-    archivos, mes = obtener_archivos_ftp()
-    datos = procesar_datos(archivos)
+    try:
+        archivos, mes = obtener_archivos_ftp()
+        datos = procesar_datos(archivos)
+    except:
+        archivos = []
+        datos = {"total": 0, "encontrados": 0, "faltantes": [], "extras": [], "porcentaje": 0}
+
     return render_template(
         "dashboard.html",
         **datos,
-        mes_actual=mes,
+        mes_actual=mes if archivos else "--",
         fecha_consulta=datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     )
+
 
 
 @app.route("/establecimientos")
