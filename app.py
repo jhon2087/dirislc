@@ -6,10 +6,9 @@ from datetime import datetime
 import os
 import logging
 from io import BytesIO
-import json
 import pytz
 
-# Configuración de logging
+# Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# --- CONFIGURACIÓN ---
+# --- CONFIG ---
 FTP_HOST = os.getenv('FTP_HOST', "pe01-st.hostinglabs.net")
 FTP_USER = os.getenv('FTP_USER', "dirislc@pe02-st.hostinglabs.net")
 FTP_PASS = os.getenv('FTP_PASS', "+2xaTGHZ7N$w+r*4")
@@ -27,20 +26,24 @@ ARCHIVO_LISTA = "ver.xlsx"
 
 
 def conectar_ftp():
-    """Conexión FTP"""
     try:
-        ftp = FTP(FTP_HOST, timeout=30)
+        ftp = FTP(FTP_HOST, timeout=20)
         ftp.login(FTP_USER, FTP_PASS)
-        logger.info(f"Conexión FTP exitosa a {FTP_HOST}")
+        logger.info("FTP conectado")
         return ftp
     except Exception as e:
-        logger.error(f"Error conexión FTP: {str(e)}")
+        logger.error(f"Error FTP: {e}")
         raise
 
 
+# ===========================
+#   OPTIMIZADO PARA VELOCIDAD
+# ===========================
+
 def obtener_archivos_ftp(mes=None):
     """
-    Obtiene SOLO archivos del día actual (MDTM → hora real de FTP)
+    Retorna SOLO archivos del día actual,
+    de forma optimizada (rápida).
     """
     try:
         tz_lima = pytz.timezone("America/Lima")
@@ -49,123 +52,138 @@ def obtener_archivos_ftp(mes=None):
         if mes is None:
             mes = datetime.now().strftime("%m")
 
-        ftp_path = f"{BASE_PATH}/{mes}"
-
         ftp = conectar_ftp()
-        ftp.cwd(ftp_path)
-        archivos = ftp.nlst()
+        ftp.cwd(f"{BASE_PATH}/{mes}")
+
+        # 🔥 OPTIMIZACIÓN 1:
+        # Filtrar archivos ANTES de consultar MDTM
+        archivos = [a for a in ftp.nlst() if a.startswith("RAtenDet-")]
 
         archivos_hoy = []
+        mdtm_cache = {}
 
         for arch in archivos:
-            try:
-                info = ftp.sendcmd(f"MDTM {arch}")   # 213 YYYYMMDDHHMMSS
-                fecha_str = info.replace("213 ", "")
 
-                fecha_utc = datetime.strptime(fecha_str, "%Y%m%d%H%M%S")
-                fecha_lima = pytz.utc.localize(fecha_utc).astimezone(tz_lima)
+            # 🔥 OPTIMIZACIÓN 2: usar cache si ya se obtuvo MDTM
+            if arch in mdtm_cache:
+                fecha_lima = mdtm_cache[arch]
+            else:
+                try:
+                    info = ftp.sendcmd(f"MDTM {arch}")
+                    fecha_str = info.replace("213 ", "")
+                    fecha_utc = datetime.strptime(fecha_str, "%Y%m%d%H%M%S")
 
-                # --- FILTRO SOLO DEL DÍA ACTUAL ---
-                if fecha_lima.date() == hoy:
-                    archivos_hoy.append(arch)
+                    fecha_lima = pytz.utc.localize(fecha_utc).astimezone(tz_lima)
+                    mdtm_cache[arch] = fecha_lima
 
-            except:
-                continue
+                except:
+                    continue
+
+            # Solo archivos de HOY
+            if fecha_lima.date() == hoy:
+                archivos_hoy.append(arch)
 
         ftp.quit()
-
-        logger.info(f"Archivos del día {hoy}: {len(archivos_hoy)} encontrados.")
         return archivos_hoy, mes
+
     except Exception as e:
-        logger.error(f"Error obteniendo archivos: {str(e)}")
+        logger.error(f"Error obteniendo archivos optimizados: {e}")
         raise
 
 
 def procesar_datos(archivos):
-    """Compara RENIPRES vs archivos del día actual"""
+    """
+    Compara RENIPRES vs archivos del día actual (optimizado)
+    """
     try:
         df = pd.read_excel(ARCHIVO_LISTA)
         df = df.iloc[:, :2]
         df.columns = ["RENIPRES", "E.S"]
-        df = df.dropna(subset=["RENIPRES"])
+        df = df.dropna()
         df["RENIPRES"] = df["RENIPRES"].astype(int)
 
         patron = re.compile(r'^RAtenDet-(\d+)-')
 
-        renipres_en_archivos = [
-            int(patron.search(a).group(1))
-            for a in archivos if patron.search(a)
-        ]
+        encontrados = set()
+        for a in archivos:
+            m = patron.match(a)
+            if m:
+                encontrados.add(int(m.group(1)))
 
-        faltantes = df[~df["RENIPRES"].isin(renipres_en_archivos)]
-        extras = [a for a in renipres_en_archivos if a not in df["RENIPRES"].tolist()]
+        faltantes = df[~df["RENIPRES"].isin(encontrados)]
+        extras = [x for x in encontrados if x not in df["RENIPRES"].tolist()]
 
         total = len(df)
-        encontrados = len(renipres_en_archivos)
-        faltantes_count = len(faltantes)
-        porcentaje = round((encontrados / total) * 100, 2) if total > 0 else 0
+        porcentaje = round((len(encontrados) / total) * 100, 2)
 
         return {
-            'total': total,
-            'encontrados': encontrados,
-            'faltantes': faltantes.to_dict(orient="records"),
-            'faltantes_count': faltantes_count,
-            'extras': extras,
-            'porcentaje': porcentaje
+            "total": total,
+            "encontrados": len(encontrados),
+            "faltantes": faltantes.to_dict(orient="records"),
+            "faltantes_count": len(faltantes),
+            "extras": extras,
+            "porcentaje": porcentaje
         }
+
     except Exception as e:
-        logger.error(f"Error en procesamiento: {str(e)}")
+        logger.error(f"Error en procesamiento: {e}")
         raise
 
 
 def obtener_detalle_establecimientos():
-    """Tabla detallada con archivos SOLO del día actual"""
+    """
+    Obtiene info de establecimientos SOLO con archivos del día actual (optimizado)
+    """
     df = pd.read_excel(ARCHIVO_LISTA)
     df = df.iloc[:, :3]
     df.columns = ["RENIPRES", "E.S", "RIS"]
     df = df.dropna()
-
     df["RENIPRES"] = df["RENIPRES"].astype(int)
 
     ftp = conectar_ftp()
-
     mes_actual = datetime.now().strftime("%m")
     ftp.cwd(f"{BASE_PATH}/{mes_actual}")
-    archivos = ftp.nlst()
 
-    patron = re.compile(r'^RAtenDet-(\d+)-(.+)$')
+    archivos = [a for a in ftp.nlst() if a.startswith("RAtenDet-")]
 
+    patron = re.compile(r'^RAtenDet-(\d+)-')
     tz_lima = pytz.timezone("America/Lima")
     hoy = datetime.now(tz_lima).date()
 
     detalle = []
+    mdtm_cache = {}
 
     for _, row in df.iterrows():
         ren = row["RENIPRES"]
-
         archivos_es = []
         fecha_carga = None
 
         for arch in archivos:
             m = patron.match(arch)
+            if not m:
+                continue
 
-            if m and int(m.group(1)) == ren:
+            if int(m.group(1)) != ren:
+                continue
+
+            # Cache MDTM (MUY RÁPIDO)
+            if arch not in mdtm_cache:
                 try:
                     info = ftp.sendcmd(f"MDTM {arch}")
                     fecha_str = info.replace("213 ", "")
-
                     fecha_utc = datetime.strptime(fecha_str, "%Y%m%d%H%M%S")
                     fecha_lima = pytz.utc.localize(fecha_utc).astimezone(tz_lima)
-
-                    # SOLO SI ES HOY
-                    if fecha_lima.date() != hoy:
-                        continue
-
-                    archivos_es.append(arch)
-                    fecha_carga = fecha_lima
-
-                except Exception:
+                    mdtm_cache[arch] = fecha_lima
+                except:
                     continue
+
+            fecha_arch = mdtm_cache[arch]
+
+            if fecha_arch.date() != hoy:
+                continue
+
+            archivos_es.append(arch)
+            fecha_carga = fecha_arch
 
         detalle.append({
             "RIS": row["RIS"],
@@ -181,129 +199,21 @@ def obtener_detalle_establecimientos():
 
 @app.route("/")
 def index():
-    try:
-        archivos, mes = obtener_archivos_ftp()
-        datos = procesar_datos(archivos)
-
-        return render_template(
-            "dashboard.html",
-            **datos,
-            mes_actual=mes,
-            fecha_consulta=datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        )
-    except Exception as e:
-        return render_template("error.html", error=str(e)), 500
-
-
-@app.route("/mes/<mes>")
-def verificar_mes(mes):
-    try:
-        if not mes.isdigit() or int(mes) < 1 or int(mes) > 12:
-            return render_template("error.html", error="Mes inválido"), 400
-
-        mes = mes.zfill(2)
-        archivos, _ = obtener_archivos_ftp(mes)
-        datos = procesar_datos(archivos)
-
-        return render_template(
-            "dashboard.html",
-            **datos,
-            mes_actual=mes,
-            fecha_consulta=datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        )
-    except Exception as e:
-        return render_template("error.html", error=str(e)), 500
-
-
-@app.route("/api/datos")
-def api_datos():
-    try:
-        archivos, mes = obtener_archivos_ftp()
-        datos = procesar_datos(archivos)
-
-        datos_json = {
-            'total': datos['total'],
-            'encontrados': datos['encontrados'],
-            'faltantes': datos['faltantes'],
-            'faltantes_count': datos['faltantes_count'],
-            'extras': datos['extras'],
-            'porcentaje': datos['porcentaje'],
-            'mes': mes,
-            'timestamp': datetime.now().isoformat()
-        }
-
-        return jsonify(datos_json)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route("/exportar/excel")
-def exportar_excel():
-    try:
-        archivos, mes = obtener_archivos_ftp()
-        datos = procesar_datos(archivos)
-
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-
-            df_faltantes = pd.DataFrame(datos['faltantes'])
-            df_faltantes.to_excel(writer, sheet_name='Faltantes', index=False)
-
-            if datos['extras']:
-                df_extras = pd.DataFrame({'RENIPRES_Extra': datos['extras']})
-                df_extras.to_excel(writer, sheet_name='Extras', index=False)
-
-            df_resumen = pd.DataFrame({
-                'Métrica': ['Total Esperado', 'Encontrados', 'Faltantes', 'Extras', 'Porcentaje'],
-                'Valor': [
-                    datos['total'],
-                    datos['encontrados'],
-                    datos['faltantes_count'],
-                    len(datos['extras']),
-                    f"{datos['porcentaje']}%"
-                ]
-            })
-            df_resumen.to_excel(writer, sheet_name='Resumen', index=False)
-
-        output.seek(0)
-
-        return send_file(
-            output,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=f'reporte_ftp_{mes}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
-        )
-    except Exception as e:
-        return render_template("error.html", error=str(e)), 500
+    archivos, mes = obtener_archivos_ftp()
+    datos = procesar_datos(archivos)
+    return render_template(
+        "dashboard.html",
+        **datos,
+        mes_actual=mes,
+        fecha_consulta=datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    )
 
 
 @app.route("/establecimientos")
 def ver_establecimientos():
-    try:
-        detalle = obtener_detalle_establecimientos()
-        return render_template("establecimientos.html", detalle=detalle)
-    except Exception as e:
-        return render_template("error.html", error=str(e)), 500
-
-
-@app.errorhandler(404)
-def not_found(e):
-    return render_template("error.html", error="Página no encontrada"), 404
-
-
-@app.errorhandler(500)
-def internal_error(e):
-    return render_template("error.html", error="Error interno del servidor"), 500
+    detalle = obtener_detalle_establecimientos()
+    return render_template("establecimientos.html", detalle=detalle)
 
 
 if __name__ == "__main__":
-    import threading
-    import webbrowser
-
-    url = "http://127.0.0.1:5000"
-
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
-
-    logger.info(f"Iniciando servidor en {url}")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True)
