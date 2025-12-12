@@ -158,7 +158,7 @@ def obtener_detalle_establecimientos():
         archivos = ftp.nlst()
         archivos = [a for a in archivos if a.startswith("RAtenDet-")]
 
-        patron = re.compile(r'^RAtenDet-(\d+)-')
+        patron = re.compile(r'^RAtenDet-(\d+).xlsx')
         mdtm_cache = {}
 
         # 🔥 Diccionario renipres → (fecha, archivo)
