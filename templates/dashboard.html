@@ -75,14 +75,7 @@
 
   <!-- Contenido principal -->
   <div class="container my-5">
-    <div class="text-center mb-5">
-      <h2 class="fw-bold text-dark">Panel de Monitoreo de Archivos</h2>
-      <p class="text-muted">Ruta FTP: <b>{{ ftp_path or 'Ruta no definida' }}</b></p>
-      {% if ultima_actualizacion %}
-      <p class="text-muted">Última actualización: {{ ultima_actualizacion }}</p>
-      {% endif %}
-    </div>
-
+  
     <!-- Indicadores principales -->
     <div class="row g-3 mb-4 text-center">
       <div class="col-md-3">
@@ -201,3 +194,4 @@
   </script>
 </body>
 </html>
+
