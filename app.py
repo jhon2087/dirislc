@@ -102,7 +102,7 @@ def procesar_datos(archivos):
         df = df.dropna()
         df["RENIPRES"] = df["RENIPRES"].astype(int)
 
-        patron = re.compile(r'^RAtenDet-(\d+)-')
+        patron = re.compile(r'^RAtenDet-(\d+)')
 
         encontrados = set()
         for a in archivos:
