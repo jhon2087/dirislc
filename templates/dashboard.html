@@ -193,73 +193,7 @@
     });
   </script>
   <!-- Agregar al final de dashboard.html, antes de </body> -->
-<script>
-// Actualización asíncrona cada 30 segundos sin recargar la página
-let tiempoActualizacion = 30000; // 30 segundos
 
-function actualizarDatos() {
-    fetch('/api/datos')
-        .then(response => response.json())
-        .then(data => {
-            if (!data.error) {
-                // Actualizar números
-                $('.card h3').eq(0).text(data.total);
-                $('.card h3').eq(1).text(data.encontrados);
-                $('.card h3').eq(2).text(data.faltantes_count);
-                $('.card h3').eq(3).text(data.porcentaje + '%');
-                
-                // Actualizar barra de progreso
-                $('.progress-bar').css('width', data.porcentaje + '%').text(data.porcentaje + '%');
-                
-                // Actualizar gráfico
-                if (window.miGrafico) {
-                    window.miGrafico.data.datasets[0].data = [data.encontrados, data.faltantes_count];
-                    window.miGrafico.update();
-                }
-                
-                // Actualizar tabla de faltantes si es necesario
-                if (data.faltantes.length > 0) {
-                    actualizarTablaFaltantes(data.faltantes);
-                }
-            }
-        })
-        .catch(error => console.error('Error:', error));
-}
-
-function actualizarTablaFaltantes(faltantes) {
-    const tbody = $('#tabla tbody');
-    tbody.empty();
-    
-    faltantes.forEach(f => {
-        tbody.append(`
-            <tr>
-                <td>${f.RENIPRES}</td>
-                <td>${f["E.S"]}</td>
-            </tr>
-        `);
-    });
-    
-    // Recargar DataTable
-    if ($.fn.DataTable.isDataTable('#tabla')) {
-        $('#tabla').DataTable().destroy();
-    }
-    $('#tabla').DataTable({
-        pageLength: 8,
-        language: { url: "//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json" }
-    });
-}
-
-// Guardar referencia al gráfico
-$(document).ready(function() {
-    // Guardar referencia para actualización
-    if (window.chart) {
-        window.miGrafico = window.chart;
-    }
-    
-    // Iniciar actualización periódica
-    setInterval(actualizarDatos, tiempoActualizacion);
-});
-</script>
 </body>
 </html>
 
