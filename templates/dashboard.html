@@ -103,7 +103,17 @@
         </div>
       </div>
     </div>
-
+     <!-- Agregar después del div row de indicadores -->
+    <div class="row mb-4">
+        <div class="col-12 text-end">
+            <button id="btnRefrescar" class="btn btn-primary" onclick="refrescarDatos()">
+                🔄 Refrescar datos del FTP
+            </button>
+            <small class="text-muted ms-2">
+                Última actualización: {{ ultima_actualizacion }}
+            </small>
+        </div>
+    </div>
     <!-- Sección dividida: gráfico izquierda / lista derecha -->
     <div class="row g-4">
       <!-- Gráfico (izquierda) -->
@@ -192,5 +202,31 @@
       });
     });
   </script>
+ 
+
+<script>
+function refrescarDatos() {
+    const btn = document.getElementById('btnRefrescar');
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Actualizando...';
+    
+    fetch('/api/refresh')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload(); // Recargar la página para mostrar nuevos datos
+            } else {
+                alert('Error al actualizar: ' + data.error);
+                btn.disabled = false;
+                btn.innerHTML = '🔄 Refrescar datos del FTP';
+            }
+        })
+        .catch(error => {
+            alert('Error de conexión: ' + error);
+            btn.disabled = false;
+            btn.innerHTML = '🔄 Refrescar datos del FTP';
+        });
+}
+</script>
 </body>
 </html>
